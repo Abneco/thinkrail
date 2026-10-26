@@ -5,6 +5,55 @@ export interface SessionStateRecord {
 	workspaceId: string;
 	projectId: string;
 	state: SessionState;
+	firstPrompt?: string;
+}
+
+export const FIRST_PROMPT_MAX_LENGTH = 200;
+
+const SKILL_BLOCK = /^\s*<skill name="([^"]+)"[^>]*>[\s\S]*?<\/skill>\s*/;
+const SKILL_COMMAND = /^\s*\/skill:(\S+)[ \t]*/;
+
+export function clampToCodePoints(text: string, maxUnits: number): string {
+	if (text.length <= maxUnits) return text;
+	const last = text.charCodeAt(maxUnits - 1);
+	return text.slice(0, last >= 0xd800 && last <= 0xdbff ? maxUnits - 1 : maxUnits);
+}
+
+const PACKAGE_HEADER = /^<[a-z][\w-]*(?:\s[^<>]*)?>$/;
+const HEAD_SCAN_LIMIT = FIRST_PROMPT_MAX_LENGTH * 4;
+
+function firstNonBlankLine(text: string): string | undefined {
+	let start = 0;
+	while (start < text.length) {
+		const newline = text.indexOf("\n", start);
+		const end = newline === -1 ? text.length : newline;
+		const line = text
+			.slice(start, Math.min(end, start + HEAD_SCAN_LIMIT))
+			.replace(/\s+/g, " ")
+			.trim();
+		if (line) return line;
+		if (newline === -1) break;
+		start = newline + 1;
+	}
+	return undefined;
+}
+
+export function firstPromptHead(text: string | undefined): string | undefined {
+	if (!text) return undefined;
+	const skill = SKILL_BLOCK.exec(text) ?? SKILL_COMMAND.exec(text);
+	const body = skill ? text.slice(skill[0].length) || `/skill:${skill[1]}` : text;
+	const line = firstNonBlankLine(body);
+	if (!line || PACKAGE_HEADER.test(line)) return undefined;
+	return clampToCodePoints(line, FIRST_PROMPT_MAX_LENGTH);
+}
+
+export function firstPromptOfTexts(texts: Iterable<string>): string | undefined {
+	for (const text of texts) {
+		if (isControlMessage(text)) continue;
+		const head = firstPromptHead(text);
+		if (head) return head;
+	}
+	return undefined;
 }
 
 export interface Project {

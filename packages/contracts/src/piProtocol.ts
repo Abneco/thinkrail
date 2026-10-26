@@ -203,6 +203,7 @@ export interface SessionSummary {
 	sessionId: string;
 	workspaceId: string;
 	title: string;
+	firstPrompt?: string;
 	model: WireModel | null;
 	thinkingLevel: ThinkingLevel;
 	isStreaming: boolean;

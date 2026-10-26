@@ -163,11 +163,29 @@ genuinely-stuck case it exists for.
 A chat tab's existing context menu gains **Rename chat**, and every row in the workspace's **Recently
 closed** chat menu gains a visible pencil action. Like workspace rename, each action replaces its own label
 in place with a chrome-less single-line input carrying the same typography and geometry; the field is
-prefilled, focused, and selected. Enter or blur commits, Escape cancels, and blank, over-80-character, and
+prefilled with the **real** title (empty for an unnamed chat, never its first-prompt label), focused, and
+selected. Enter or blur commits, Escape cancels, and blank, over-80-character, and
 unchanged values never issue a request. Keyboard commit/cancel restores the replacement tab or history-row
 control; pointer blur preserves the user's new focus target. The named, viewport-bounded interactive history
 popover remains open and scrollable while its row is edited. The controls render only when the welcome
 protocol supports `session.rename`.
+
+**Unnamed chats read as their first prompt.** Every shell surface that shows a chat title renders one
+`lib` `chatLabel` (the store's `selectChatTitle` for panels): a real name wins; a chat the agent has not
+named yet shows the head of its first prompt in the same style as a named chat, else the generic label —
+the switcher included, which no longer words an unread title differently. The element carries the label's
+`data-title-source="name" | "prompt" | "default"` and, for a prompt label, the full first line as its
+tooltip. The tab strip receives the prompts as the Workbench's `chatFirstPrompts` prop
+(`selectUnnamedChatFirstPrompts`, by session id, covering a plan document's chat too) beside the rename
+callback — the layout document itself is never relabelled, because every Workbench mutation commits a
+derivative of the document it was given and a relabelled copy would persist the fallback as the tab's
+name; `openPlan` likewise stores the real chat name (and the title fold renames the plan tab with its
+chat), so the plan tab is worded at render and follows the real title once it lands. Recently closed
+rows and the session switcher read the same `selectChatFirstPrompt` (the host's state record first, so a
+row a peer's `session.created` added without a prompt picks it up from the next state push); the switcher
+carries `firstPrompt` beside `chatTitle` so the host title backfill still applies to a chat shown by its
+prompt. Nothing writes the label: the agent's
+`set_title` or a manual rename replaces it everywhere through the same `session_info_changed` fold.
 
 The shell injects the chat-only mutation callback into the otherwise domain-neutral Workbench tab menu rather
 than teaching the pure layout engine how sessions are persisted. A commit has no optimistic domain write: the

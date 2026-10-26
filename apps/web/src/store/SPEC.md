@@ -219,10 +219,11 @@ re-read while a server starts. The state vocabulary and the attention/active pre
   labels or a still-queued open, but cannot recreate a locally closed placement or steal focus.
   **The durable-title fold** routes
   `session_info_changed` through the same one-home chat-label mutation already used by extension-UI
-  `setTitle`: normalize an absent name to the empty untitled name (worded at render by `lib`'s `chatName`, as
-  `selectChatTitle` does; `selectChatName` returns the stored name, and `workspaceName(t, ws)` words the
-  host-named default workspace); update the cached `ChatTab`, its existing local
-  placement, any queued open, or its `closedChatsByWorkspace` row; and change no recency, runtime, placement,
+  `setTitle`: normalize an absent name to the empty untitled name (worded at render by `lib`'s
+  `chatDisplayName`, as `selectChatTitle` does; `selectChatName` returns the stored name, and
+  `workspaceName(t, ws)` words the host-named default workspace); update the cached `ChatTab` and the same
+  session's `PlanTab` (each with its existing local placement and any queued open, matched by resource
+  identity), and/or its `closedChatsByWorkspace` row; and change no recency, runtime, placement,
   navigation clock, or attention. The durable Pi event may supersede an extension's presentation-only title.
   An event for a session this surface has never listed remains a no-op—`session.list`/`session.getMessages`
   supply reconnect and later-hydration truth, so there is no title-specific event buffer.
@@ -306,6 +307,14 @@ re-read while a server starts. The state vocabulary and the attention/active pre
     (contracts' `isSessionWorking`, so a chat idle on background commands or subagents still reads as
     running),
     unread-finished, and project/workspace rollups—no stored precedence or second running slice.
+    The record's `firstPrompt` is the preferred source of **`selectChatFirstPrompt`** (then the
+    `ClosedChat` row, then the loaded runtime's user turns through contracts' `firstPromptOfTexts` — the
+    same reading the host applies, so an optimistic `/skill:` send or a leading package yields the head the
+    host will report; the runtime only until the host has reported one, since a hydrated runtime may start
+    after a compaction); `selectChatTitle` folds it through `chatDisplayName`,
+    `selectUnnamedChatFirstPrompts` collects it for the workspace's unnamed chat *and plan* tabs by session
+    id, and `selectSwitcherGroups` reads the same selector into `SwitcherSession.firstPrompt` beside the
+    real `chatTitle` (its hook subscribes to `sessions` only while the palette is open).
     `SessionRuntime.hostState` is installed with transcript hydration and by state pushes delivered after Pi
     events. A result is **read when it is seen**, not on a gesture: `selectReadyCompletionAck` returns the
     exact unread completion id only while the connection is current, the runtime is synced to this
@@ -343,7 +352,9 @@ re-read while a server starts. The state vocabulary and the attention/active pre
   disk-only sessions (from `session.list`) and peer-created sessions (from the `session.created` summary)
   there too—idempotently, skipping live/open sessions while refreshing an existing history row from a newer
   summary—so a chat that survived a host restart or was created in another frontend is reopenable without
-  gaining local placement. **`deleteChat(workspaceId, sessionId)`** is the idempotent
+  gaining local placement. A `ClosedChat` keeps the summary's `firstPrompt` beside its `title`, and the
+  close transition copies the open chat's (`selectChatFirstPrompt`); history rows still read through
+  `selectChatFirstPrompt`, whose host record outranks that copy. **`deleteChat(workspaceId, sessionId)`** is the idempotent
   fold for both a confirmed local `session.delete` and the `session.deleted` broadcast: it atomically drops
   every tab the chat owns — its transcript, live plan page, and any dependent legacy document cache — plus
   its history row/runtime + skill baseline, records a page-lifetime tombstone, removes queued opens for the

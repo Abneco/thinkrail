@@ -52,6 +52,15 @@ default, narrow cross-ring guards, and the quit-confirmation rule both clients d
   `THEME_MODES`, `isThemeMode`, `isSystemThemePair`, `normalizeThemePreference`,
   `JBCENTRAL_QUOTA_REFRESH_SECONDS`, `isJbcentralQuotaRefreshSeconds`, `isJbcentralConnected`,
   `SESSION_RENAME_PROTOCOL_VERSION`, `SESSION_TITLE_MAX_LENGTH`, `normalizeSessionTitle`,
+  `FIRST_PROMPT_MAX_LENGTH` + **`firstPromptHead(text)`** + **`firstPromptOfTexts(texts)`** +
+  **`clampToCodePoints(text, maxUnits)`** (the one shared reading of a chat's first prompt for the
+  unnamed-chat label: the first user text that is not a control message and has a head; a head is the first
+  non-blank line, whitespace collapsed, clamped to 200 UTF-16 units without splitting a surrogate pair; a
+  leading skill block *or* the `/skill:<name> <request>` command it expands from reads as the request, else
+  `/skill:<name>`; a first line that is one lowercase tag alone (a package header such as `<review …>`) or
+  no text has no head and the next user text is tried — a prompt that merely starts with `<Button>` keeps
+  its head; only the first 800 units of a line are normalized —
+  host and client call the same functions over their user texts so the label never jumps),
   `LINE_WIDTH_COLUMNS` + **`isLineWidth(value)`** (the shared 40–240 integer contract for synchronized
   chat/file wrap columns), `MAX_HISTORY_LIMIT`, `MAX_HISTORY_QUERY_LENGTH`, `TODO_NUDGE_PREFIX` +
   **`isControlMessage(text)`** (the one shared reading of that marker — the client hides such sends on
@@ -180,6 +189,10 @@ default, narrow cross-ring guards, and the quit-confirmation rule both clients d
     `session_info_changed { name?: string }` is the one live domain update for manual and automatic changes,
     and `session.list`/`session.getMessages` repair a missed event. No title source/provenance, uniqueness,
     workspace coupling, or new push channel crosses the wire; session ids remain canonical.
+    **`SessionSummary.firstPrompt`** and **`SessionStateRecord.firstPrompt`** (optional, additive, no
+    version gate) carry `firstPromptHead` of the transcript's first user prompt beside the title: the
+    display fallback for a chat that has no name, never a name — no mutation accepts it, nothing writes
+    it into the session, and an older host simply omits it (the client shows its generic label).
   - the **extension-UI frames** **`ExtUiRequest`** / **`ExtUiResponse`** — our wire shape for pi's in-process
     `uiContext` calls (`select`/`confirm`/`input`/`editor` round-trip; `notify`/`setStatus`/`setWidget`/
     `setTitle`/`dismiss` are fire-and-forget), carried on the `pi.extensionUi` channel. A round-trip
