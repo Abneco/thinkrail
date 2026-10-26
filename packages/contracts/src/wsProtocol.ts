@@ -19,6 +19,9 @@ import type {
 	GitStatus,
 	HistoryScope,
 	HistorySearchResult,
+	HostEnvironment,
+	HostEnvironmentStatus,
+	HostEnvironmentUpdateResult,
 	InterviewResponse,
 	JbcentralActionResult,
 	JbcentralConnectResult,
@@ -117,7 +120,8 @@ export type TemplateReadLocation =
 	| { projectId: string; workspaceId?: never }
 	| { workspaceId?: never; projectId?: never };
 
-export const PROTOCOL_VERSION = 90;
+export const PROTOCOL_VERSION = 91;
+export const HOST_ENVIRONMENT_PROTOCOL_VERSION = 91;
 export const CLIENT_ERROR_REPORT_PROTOCOL_VERSION = 90;
 export const LOCALES_PROTOCOL_VERSION = 89;
 export const REVIEW_ACTIONS_PROTOCOL_VERSION = 88;
@@ -321,6 +325,8 @@ export const WS_METHODS = {
 	providerJbcentralQuota: "provider.jbcentralQuota",
 	hostUpdate: "host.update",
 	settingsUpdate: "settings.update",
+	environmentGet: "environment.get",
+	environmentUpdate: "environment.update",
 	feedbackRespond: "feedback.respond",
 	clientReportError: "client.reportError",
 	historySearch: "history.search",
@@ -900,6 +906,11 @@ export interface WsMethodMap {
 	"provider.jbcentralQuota": { params: { force?: boolean }; result: JbcentralQuotaSnapshot };
 	"host.update": { params: Record<string, never>; result: Ack };
 	"settings.update": { params: { config: AppConfigUpdate }; result: AppConfig };
+	"environment.get": { params: Record<string, never>; result: HostEnvironmentStatus };
+	"environment.update": {
+		params: { environment: HostEnvironment };
+		result: HostEnvironmentUpdateResult;
+	};
 	"feedback.respond": { params: { action: InterviewResponse }; result: Ack };
 	"client.reportError": { params: ClientErrorReport; result: Ack };
 	"history.search": {
