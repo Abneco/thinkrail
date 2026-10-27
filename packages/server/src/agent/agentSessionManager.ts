@@ -113,6 +113,8 @@ import {
 	showPendingMcpReload,
 	watchMcpStatus,
 } from "./mcpSessions";
+import { refreshModelListings } from "./modelAvailability";
+import { preferredDefaultModel } from "./modelDefaults";
 import {
 	getPiRuntimeGeneration,
 	type PiRuntimeGeneration,
@@ -1971,7 +1973,11 @@ async function openDiskSession(
 	if (persistedModel) {
 		try {
 			exactModel = resolvePersistedModel(generation.runtime, persistedModel);
-		} catch {}
+		} catch {
+			const pi = generation.runtime.getAvailableSnapshot();
+			if (pi.some((model) => sameModel(model, persistedModel)))
+				exactModel = preferredDefaultModel(settledAvailableModels(generation.runtime));
+		}
 	}
 	repairDanglingToolCalls(sessionManager);
 	await createParentSession(
@@ -2645,6 +2651,7 @@ export function getSessionCommands(sessionId: string): SlashCommandInfo[] {
 export async function listAvailableModels(): Promise<WireModel[]> {
 	const generation = await getPiRuntimeGeneration();
 	void refreshCatalogs(generation.runtime);
+	void refreshModelListings(generation.runtime, generation.opaqueProviderIds);
 	return readAvailableWireModels(generation);
 }
 
@@ -2654,7 +2661,10 @@ export async function listSettledModels(): Promise<WireModel[]> {
 
 export async function refreshAvailableModels(force = false): Promise<RefreshedModels> {
 	const generation = await getPiRuntimeGeneration();
-	const { completed } = await refreshCatalogs(generation.runtime, { force });
+	const [{ completed }] = await Promise.all([
+		refreshCatalogs(generation.runtime, { force }),
+		refreshModelListings(generation.runtime, generation.opaqueProviderIds, { force }),
+	]);
 	return { models: readAvailableWireModels(generation), complete: completed };
 }
 
