@@ -153,7 +153,8 @@ answer-injection path, and the **restart repair** that keeps re-opened transcrip
     `tool_execution_end` / `tool_execution_update` frames drop `structuredContent` from the (partial)
     result: pi's value for programmatic callers (bash puts up to 1 MiB of raw output there), never
     persisted and never rendered, so forwarding it would only grow every live frame and the browser
-    store. The live entry retains
+    store. `entry_appended` is projected to `{ entryType }` only: extension and pi-internal entry payloads
+    never cross the wire. The live entry retains
     that settlement in `SessionSummary.lastSettlement` for reconnect after Pi removed a failed attempt from its rebuilt
     context; a new `agent_start` exposes explicit `null` (no current terminal) so an older persisted failure
     cannot reappear mid-run, while disk sessions remain transcript-authoritative. A live summary also
@@ -572,7 +573,49 @@ answer-injection path, and the **restart repair** that keeps re-opened transcrip
     while parents created afterward project the new generation. The host-wide `getPiRuntime` resolver
     is passed as the core's dynamic fallback rather than captured at service creation. One
     `DelegationService` per workspace is cached (`delegationServiceFor`, synchronous — nothing awaits
-    at bind time). A host-injected `setSubagentConcurrencyResolver` supplies each service's per-chat
+    at bind time). A parented run's spend is appended to the live parent as pi `usage` entries
+    (`kind: "subagent"`, `note` = child session id; only the cost total is known), each publishing
+    `entry_appended { entryType: "usage" }`: every `run-progress` (after each child response or tool
+    start) appends the increment of the run's usage delta over a per-run watermark, and `run-terminal`
+    appends the remainder, so the toolbar follows a running subagent and pi's own session totals include
+    delegated spend for every outcome and consumer (Agent, `request_review`), independent of completion
+    delivery. The watermark (`subagentUsage`'s run recorder) is in-memory, lives from a run's first record
+    until its `run-terminal`, and advances whenever pi took the increment into its session (even if
+    persisting it failed), so a write is never counted twice; an increment pi did not take is carried by
+    the next one, but one dropped
+    at `run-terminal` is not carried into the child's next run — reconciliation recovers it. Increments
+    record any positive token count or a cost above 1e-9. Progress events skip the listener's
+    resource/state publishes (resource summaries carry status, not usage). Progress only freshens the
+    readout; crash recovery still comes from child transcripts and reconciliation. This is
+    delegated spend's only accounting channel: delegation tools must never return `AgentToolResult.usage`,
+    which pi would sum a second time. The write is best-effort, like pi's cache warmer: a failed append is
+    logged and never fails the child run. `recordSessionUsage` reports only whether pi took the usage into
+    its session; persistence stays uncertain. pi moves the leaf to a new entry before persisting it, so a
+    failed append restores the previous leaf (later entries must never chain to an unpersisted id, or a
+    reopened chat loses its history before it) and truncates an existing transcript back to its pre-append
+    size (a torn partial line would swallow the next entry); pi's initial file creation is outside this
+    repair. A usage entry pi kept only in memory counts in this process and is restored on disk by
+    reconciliation after the chat is reopened. Closing
+    a chat keeps its entry writable until its teardown cascade settles, so runs that cascade stops are
+    still recorded; attach is refused during teardown, so the transcript keeps one writer. A deletion
+    tombstone suppresses the write, because pi's append would recreate the trashed file. Graceful host
+    shutdown records within its budget; emergency disposal (`disposeAllSessions`) revokes the teardown
+    writers together with the tombstones, so a late record can never recreate a trashed transcript, and
+    records it drops are recovered when the chat is next attached. Children cannot spawn children (`RECURSION_GUARD_TOOLS`), so deltas
+    never nest. **`subagentUsage`** makes the transcript, not the event, authoritative: every attach, and
+    a deletion rolled back after its tombstone suppressed a terminal write, asynchronously totals each
+    fresh child file without a queued or running run under the parent's delegation directory and appends
+    the shortfall against the parent's `subagent` entries for that child. This recovers runs a
+    crash or kill never finished, back-fills chats from before parent recording, and picks up child spend
+    outside runs. Parsed child totals are cached per process by file path, mtime and size, so an unchanged
+    child file version is read once (overlapping scans may repeat it); every reconciliation compares those
+    totals with the parent's current records, with no record-timestamp shortcut, so a record lost after a
+    reopen is recovered even when a later record of the same child survived. The shortfall is recomputed
+    from the live entries immediately before appending, so overlapping reconciliations cannot
+    double-count; it is appended only when no token count is negative and tokens or cost (above 1e-9, to
+    ignore floating-point noise) are missing, never as a negative correction. Forked children
+    (header `parentSession`) are skipped because their copied history carries the parent's own spend.
+    A host-injected `setSubagentConcurrencyResolver` supplies each service's per-chat
     limit at creation, and `refreshSubagentConcurrency(workspaceId?)` re-resolves and live-resizes the
     cached services (core `setMaxConcurrentPerParent`) after a global or workspace limit change; `subagentsFor(workspaceId, isEnabled, canDeliverCompletion)` creates one retained portable
     `Subagents` owner per parent; its extension is injected on every resource load. A host-injected

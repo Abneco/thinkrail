@@ -157,6 +157,20 @@ apart from the recorded selection. Run the manager's restart regressions on upgr
   discovery and prompt-template/frontmatter rules where public APIs cannot serve its read/edit UI.
   Prefer public discovery/parsing APIs when they meet those needs; retain parity coverage in history,
   template and composer tests until then.
+- **Subagent usage totals from child transcripts** — [[submodule-server-agent]], `subagentUsage.ts`.
+  Pi's session-total loop (`AgentSession.getSessionStats`) is not exported for a bare session file, so
+  the host mirrors which entries carry spend (`usage`, compaction/branch-summary `usage`, assistant and
+  tool-result message usage) to reconcile crashed child runs. Remove the mirror when pi exports a totals
+  helper over entries or a file. Until then `delegation.test.ts` ("the subagent totals mirror matches pi's
+  own totals for every spend source") pins parity with pi's `getSessionStats` on one transcript that
+  carries every spend source, including off-branch spend; rerun it on every pi bump.
+- **Rollback of a failed usage append** — [[submodule-server-agent]], `recordSessionUsage`.
+  `SessionManager._appendEntry` adds the entry to memory and moves the leaf before `_persist`, and a
+  failed `appendFileSync` can leave a torn partial line. The host therefore restores the previous leaf
+  and truncates an existing transcript back to its pre-append size; `delegation.test.ts` pins both
+  ("a usage write pi kept only in memory never cuts the reopened history", "a torn usage append is cut
+  back…"). Remove the leaf restore when a failed persist leaves pi's memory and leaf unchanged; remove the
+  truncation only when pi also guarantees that a failed append leaves no torn bytes.
 
 - **Detached result hold** — [[module-pi-subagents]] (Result delivery) and
   [[module-pi-background-commands]], applied by [[submodule-server-agent]]'s `turn_end` and

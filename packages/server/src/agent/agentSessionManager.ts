@@ -1,8 +1,8 @@
-import { createReadStream, existsSync, rmSync } from "node:fs";
+import { createReadStream, existsSync, rmSync, statSync, truncateSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
-import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import { clampThinkingLevel, getSupportedThinkingLevels, type Usage } from "@earendil-works/pi-ai";
 import {
 	type AgentSession,
 	type CreateAgentSessionOptions,
@@ -90,6 +90,7 @@ import { publishSessionResourcesChanged } from "./chatResources";
 import {
 	disposeSessionChildren,
 	hasLiveSessionChildren,
+	reconcileSessionSubagentUsage,
 	removeWorkspaceDelegation,
 	stopSessionChildren,
 	subagentsFor,
@@ -183,6 +184,7 @@ const workspaceLifecycleGenerations = new Map<string, number>();
 const closingWorkspaces = new Map<string, number>();
 const pendingSessionPreparations = new Map<string, Set<Promise<unknown>>>();
 const sessionTeardowns = new Map<string, Promise<void>>();
+const tearingDownEntries = new Map<string, Entry>();
 
 interface WorkspaceLifecycleToken {
 	global: number;
@@ -1300,6 +1302,7 @@ async function registerSession(
 	restartMcpStatus(session.sessionId);
 	commands.flushCompletions();
 	subagents.flushCompletions();
+	reconcileSubagentUsageInBackground(workspaceId, session.sessionId);
 	log.debug(`session ${session.sessionId} attached (workspace ${workspaceId})`);
 	if (announceCreation) {
 		publishCreated(summaryOf(session.sessionId, prepared.entry));
@@ -2449,7 +2452,7 @@ export function setSessionThinkingLevel(sessionId: string, level: ThinkingLevel)
 export function getSessionStats(sessionId: string): SessionStats {
 	const session = mustGet(sessionId);
 	const stats = session.getSessionStats();
-	const contextUsage = stats.contextUsage ?? session.getContextUsage();
+	const { contextUsage } = stats;
 	return {
 		sessionId: stats.sessionId,
 		totalMessages: stats.totalMessages,
@@ -2463,6 +2466,74 @@ export function getSessionStats(sessionId: string): SessionStats {
 		cost: stats.cost,
 		...(contextUsage ? { contextUsage } : {}),
 	};
+}
+
+function reconcileSubagentUsageInBackground(workspaceId: string, sessionId: string): void {
+	void reconcileSessionSubagentUsage(workspaceId, sessionId, () =>
+		usageWritableEntry(sessionId)?.session.sessionManager.getEntries(),
+	).catch((error: unknown) =>
+		log.warn(`subagent usage was not reconciled for ${sessionId}`, error as Error),
+	);
+}
+
+function usageWritableEntry(sessionId: string): Entry | undefined {
+	if (hasDeletionTombstone(sessionId)) return undefined;
+	return sessions.get(sessionId) ?? tearingDownEntries.get(sessionId);
+}
+
+function sessionFileSize(file: string | undefined): number | undefined {
+	if (!file) return undefined;
+	try {
+		return statSync(file).size;
+	} catch {
+		return undefined;
+	}
+}
+
+function rollBackUsageAppend(
+	sessionId: string,
+	sessionManager: SessionManager,
+	leaf: string | null,
+	file: string | undefined,
+	size: number | undefined,
+): boolean {
+	const incorporated = sessionManager.getLeafId() !== leaf;
+	try {
+		if (incorporated && leaf) sessionManager.branch(leaf);
+		else if (incorporated) sessionManager.resetLeaf();
+		if (file && size !== undefined && statSync(file).size > size) truncateSync(file, size);
+	} catch (error) {
+		log.warn(`a failed usage append was not rolled back for ${sessionId}`, error as Error);
+	}
+	return incorporated;
+}
+
+/** Returns whether pi took the usage into its session totals; persisting it is best-effort. */
+export function recordSessionUsage(
+	sessionId: string,
+	record: { kind: string; provider: string; model: string; usage: Usage; note?: string },
+): boolean {
+	const entry = usageWritableEntry(sessionId);
+	if (!entry) return false;
+	const { sessionManager } = entry.session;
+	const { kind, provider, model, usage, note } = record;
+	const leaf = sessionManager.getLeafId();
+	const file = sessionManager.getSessionFile();
+	const size = sessionFileSize(file);
+	let incorporated = true;
+	try {
+		sessionManager.appendUsage(kind, provider, model, usage, note);
+	} catch (error) {
+		incorporated = rollBackUsageAppend(sessionId, sessionManager, leaf, file, size);
+		log.warn(`${kind} usage was not persisted for ${sessionId}`, error as Error);
+	}
+	if (!incorporated) return false;
+	try {
+		publish({ sessionId, event: { type: "entry_appended", entryType: "usage" } });
+	} catch (error) {
+		log.warn(`usage invalidation was not published for ${sessionId}`, error as Error);
+	}
+	return true;
 }
 
 export interface McpSessionView {
@@ -2722,6 +2793,10 @@ function disposeSession(sessionId: string): Promise<void> {
 	if (!entry) return Promise.resolve();
 	entry.disposed = true;
 	const cascade = trackSessionTeardown(sessionId, closeSessionResources(entry));
+	tearingDownEntries.set(sessionId, entry);
+	void cascade.finally(() => {
+		if (tearingDownEntries.get(sessionId) === entry) tearingDownEntries.delete(sessionId);
+	});
 	cancelExtUiForSession(sessionId);
 	forgetMcpStatus(sessionId);
 	entry.askUserQuestionWaiters.abandon();
@@ -2767,6 +2842,7 @@ export function disposeAllSessions(): void {
 		disposePiSessionAfterShutdown(entry);
 	}
 	sessions.clear();
+	tearingDownEntries.clear();
 	deletedSessions.clear();
 }
 
@@ -2919,6 +2995,7 @@ async function runDeleteTransaction(
 			deletedSessions.delete(sessionId);
 			sessions.get(sessionId)?.commands.flushCompletions();
 			sessions.get(sessionId)?.subagents.flushCompletions();
+			if (sessions.has(sessionId)) reconcileSubagentUsageInBackground(workspaceId, sessionId);
 			publishSessionResourcesChanged(workspaceId, sessionId);
 		}
 		throw error;
