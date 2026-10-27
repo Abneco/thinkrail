@@ -71,8 +71,6 @@ import type {
 } from "./domain";
 import { isDelegationRunDetails } from "./domain";
 import type {
-	AskUserAnswersDetails,
-	AskUserQuestionResult,
 	ExtUiResponse,
 	ImageContent,
 	QueueLane,
@@ -84,6 +82,8 @@ import type {
 	SkillCatalogEntry,
 	SlashCommandInfo,
 	ThinkingLevel,
+	ToolResponseDetails,
+	ToolResponsePendingDetails,
 	TranscriptMessage,
 	WireCustomMessage,
 	WireModel,
@@ -122,7 +122,8 @@ export type TemplateReadLocation =
 	| { projectId: string; workspaceId?: never }
 	| { workspaceId?: never; projectId?: never };
 
-export const PROTOCOL_VERSION = 92;
+export const PROTOCOL_VERSION = 93;
+export const TOOL_RESPONSE_PROTOCOL_VERSION = 93;
 export const USER_THEMES_PROTOCOL_VERSION = 92;
 export const HOST_ENVIRONMENT_PROTOCOL_VERSION = 91;
 export const CLIENT_ERROR_REPORT_PROTOCOL_VERSION = 90;
@@ -298,6 +299,7 @@ export const WS_METHODS = {
 	sessionGetCommands: "session.getCommands",
 	sessionReloadResources: "session.reloadResources",
 	sessionExtUiReply: "session.extUiReply",
+	sessionRespondToTool: "session.respondToTool",
 	sessionAnswerQuestion: "session.answerQuestion",
 	sessionList: "session.list",
 	sessionStateList: "session.stateList",
@@ -397,24 +399,33 @@ export const WS_CHANNELS = {
 type SameUnion<A extends B, B extends C, C = A> = A;
 export type WsChannel = (typeof WS_CHANNELS)[keyof typeof WS_CHANNELS];
 
-export const ASK_USER_ANSWERS_CUSTOM_TYPE = "ask-user-answers";
+export const TOOL_RESPONSE_CUSTOM_TYPE = "tool-response";
+const LEGACY_ASK_ANSWERS_CUSTOM_TYPE = "ask-user-answers";
 
-export interface AskUserAnswersMessage extends WireCustomMessage<AskUserAnswersDetails> {
-	customType: typeof ASK_USER_ANSWERS_CUSTOM_TYPE;
-	details: AskUserAnswersDetails;
+export interface ToolResponseMessage extends WireCustomMessage<ToolResponseDetails> {
+	customType: typeof TOOL_RESPONSE_CUSTOM_TYPE;
+	details: ToolResponseDetails;
 }
 
-export function isAskUserAnswersMessage(message: unknown): message is AskUserAnswersMessage {
-	if (!message || typeof message !== "object") return false;
-	const m = message as { role?: unknown; customType?: unknown; details?: unknown };
-	if (m.role !== "custom" || m.customType !== ASK_USER_ANSWERS_CUSTOM_TYPE) return false;
-	const details = m.details as Partial<AskUserAnswersDetails> | undefined;
+export function isToolResponsePending(details: unknown): details is ToolResponsePendingDetails {
 	return (
-		typeof details?.toolCallId === "string" &&
-		!!details.result &&
-		Array.isArray(details.result.answers) &&
-		typeof details.result.cancelled === "boolean"
+		!!details &&
+		typeof details === "object" &&
+		(details as ToolResponsePendingDetails).kind === "ack"
 	);
+}
+
+export function readToolResponseMessage(message: unknown): ToolResponseDetails | null {
+	if (!message || typeof message !== "object") return null;
+	const m = message as { role?: unknown; customType?: unknown; details?: unknown };
+	if (m.role !== "custom" || !m.details || typeof m.details !== "object") return null;
+	const details = m.details as { toolCallId?: unknown; response?: unknown; result?: unknown };
+	if (typeof details.toolCallId !== "string") return null;
+	if (m.customType === TOOL_RESPONSE_CUSTOM_TYPE && "response" in details)
+		return { toolCallId: details.toolCallId, response: details.response };
+	if (m.customType === LEGACY_ASK_ANSWERS_CUSTOM_TYPE && details.result !== undefined)
+		return { toolCallId: details.toolCallId, response: details.result };
+	return null;
 }
 
 export const SUBAGENT_COMPLETION_CUSTOM_TYPE = "subagent-completion";
@@ -852,8 +863,12 @@ export interface WsMethodMap {
 	"session.getCommands": { params: { sessionId: string }; result: SlashCommandInfo[] };
 	"session.reloadResources": { params: { sessionId: string }; result: Ack };
 	"session.extUiReply": { params: { response: ExtUiResponse }; result: Ack };
+	"session.respondToTool": {
+		params: { sessionId: string; toolCallId: string; response: unknown };
+		result: Ack;
+	};
 	"session.answerQuestion": {
-		params: { sessionId: string; toolCallId: string; result: AskUserQuestionResult };
+		params: { sessionId: string; toolCallId: string; result: unknown };
 		result: Ack;
 	};
 	"session.list": { params: { workspaceId: string }; result: SessionSummary[] };

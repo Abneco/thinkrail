@@ -21,7 +21,7 @@ dials it over the network; a phone reaches the selected host over Tailscale.
 - **Engine host** (`packages/server` + `packages/shared`, launched by `apps/cli` or `apps/desktop`
   in local-host mode): owns `pi`, session state, persistence, and serves the wire endpoint. It bundles pi extensions
   (`pi-web-access`, `pi-spec-graph`, `pi-thinkrail-workflow`, `pi-todos`) and the ThinkRail extensions
-  from its server registry (`visualize`) into every session.
+  from its server registry (`visualize`, `ask-user-question`) into every session.
 - **The wire** (`packages/contracts`): the typed, versioned protocol — the only coupling between client
   and host.
 - **UI client** (`apps/web`): a mobile-first React client, transport-driven and endpoint-configurable,
@@ -53,7 +53,7 @@ packages/pi-thinkrail-workflow pi extension: the workflow skill system + its alw
 pi-extensions/*     portable pi packages published to npm as @thinkrail/pi-<name>; work in vanilla pi
                     (decided, Decision 20; the pi-* packages above move here per publish wave)
 thinkrail-extensions/*  ThinkRail extensions: a pi capability + ./server and ./web halves, composed by one
-                    registry file per side (Decision 21; visualize shipped) ── depends on ─▶ pi-extensions/*,
+                    registry file per side (Decision 21; visualize and ask-user-question shipped) ── depends on ─▶ pi-extensions/*,
                     packages/extension-api, packages/ui, packages/locales (web half)
 packages/extension-api  types + define* helpers for extension halves ── depends on ─▶ packages/contracts, packages/locales (types)
 packages/ui         owned shadcn/Radix primitives + cn + onThemeSwap ── may depend on ─▶ packages/contracts, packages/locales
@@ -378,7 +378,19 @@ dependency. This keeps test process drivers outside both launchers and the serve
     layouts). Pilot, shipped in three PRs: visualize — `lovely-mermaid` for TUI rendering and
     best-effort validation in the portable package, strict `mermaid`+`linkedom` validation injected by
     the ThinkRail server half through `createVisualizeExtension({ validateMermaid })`; the old
-    `packages/pi-visualize` is deleted. Detail: [[module-thinkrail-extensions]].
+    `packages/pi-visualize` is deleted. Second: ask-user-question — the portable package asks through a
+    terminal questionnaire or per-question dialogs; ThinkRail composes it per parent session through the
+    registry's `sessionExtensions(session)` seam with an asker over the host's **interactive-tool
+    mailbox** (`awaitToolResponse`) — the first per-session host service an extension receives. The
+    mailbox, restart repair, late responses, composer supersede, Stop/Submit, needs-input and the web
+    `interaction` props are **tool-agnostic**: keyed by `toolCallId`, told which tool names wait for a
+    person by the descriptor's `interactiveTools` and the renderer's `interactive` flag, and never
+    naming a tool in `contracts`, `agent` or `apps/web`. `ask_user_question` is the first client of that
+    contract, not a special case; the extension is deletable without touching the core (the vanilla
+    package then falls back to pi's `ctx.ui` dialogs, which the host already renders). Product rule: a
+    built-in (registry) extension wins a same-name tool collision with a user package while it is
+    enabled; switched off, the package's tool runs ([[pi-compatibility]] holds the pi-level mechanism).
+    Detail: [[module-thinkrail-extensions]].
 
 22. **A path's spelling follows its kind.** A directory identity (`Project.path`,
     `Workspace.worktreePath`) is the host's **resolved** spelling (`path.resolve`), exactly what pi records as a
